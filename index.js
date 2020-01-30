@@ -9,15 +9,52 @@ const teamChannelId = process.env.CHANNEL_ID
 const bot = new TelegramBot(token, { polling: true })
 
 const welcomeMessage = (username) => {
-  return `Hey ${username}! When starting working activity - just type your intention here and it will be broadcasted to team channel for coordination`  
+  return `Hey ${username}! When starting working activity - just type your intention here and it will be broadcasted to team channel for coordination`
 }
 
 const answerMessage = (username, timeSpent) => {
   return `Well done, ${username}! Your activity took ${timeSpent}`
 }
 
+const encodeCallbackQuery = (query) => {
+  if (query['type'] == 'gratitude') {
+    return `g:${query['currentScore']}`
+  } else if (query['type'] == 'finish') {
+    return `f:${query['messageDate']}:${query['channelMessageId']}`
+  } else {
+    throw new Error("cannot encode query (not supported type)")
+  }
+}
+
+const decodeCallbackQuery = (encodedQuery) => {
+  const query = encodedQuery.split(':')
+
+  let type;
+
+  if (query[0] == 'g') {
+    type = 'gratitude'
+  } else if (query[0] == 'f') {
+    type = 'finish'
+  }
+
+  if (type == 'gratitude') {
+    return {
+      type: type,
+      currentScore: query[1]
+    }
+  } else if (type == 'finish') {
+    return {
+      type: type,
+      messageDate: query[1],
+      channelMessageId: query[2]
+    }
+  } else {
+    throw new Error("cannot decode query (not supported type)")
+  }
+}
+
 const handleFinishCallback = (callbackQuery) => {
-  const queryData = JSON.parse(callbackQuery.data)
+  const queryData = decodeCallbackQuery(callbackQuery.data)
 
   const userMessageDate = queryData.messageDate
   const channelMessageId = queryData.channelMessageId
@@ -50,23 +87,56 @@ const handleFinishCallback = (callbackQuery) => {
 
   bot.editMessageText(messageWithResult, userChatOpts)
 
-  bot.editMessageText(messageWithResult, teamChannelOpts)  
+  bot.editMessageText(messageWithResult, teamChannelOpts)
 }
 
 const handleGratitudeCallback = (callbackQuery) => {
-  const queryData = JSON.parse(callbackQuery.data)
-  const inlineMessageId = callbackQuery.inline_message_id
+  console.log(JSON.stringify(callbackQuery))
+
+  const gratitudePrefix = '\ngratitude from '
+
+  const fullMessage = callbackQuery.message.text
+  const currentGratitudeGiver = callbackQuery.from.username
+
+  const gratitudeSectionOffset = fullMessage.indexOf(gratitudePrefix)
+
+  const gratitudeGivers = [
+    ...callbackQuery.message.entities
+      .filter(entity =>
+        entity.type == 'mention' &&
+        entity.offset > gratitudeSectionOffset &&
+        gratitudeSectionOffset > 0
+      )
+      .map(entity =>
+        fullMessage.substr(entity.offset, entity.length)
+      ),
+    `@${currentGratitudeGiver}`
+  ].filter((v, i, a) => a.indexOf(v) === i)
+
+  const messageWithoutGratitude =
+    gratitudeSectionOffset == -1 ?
+      fullMessage :
+      fullMessage.substr(0, gratitudeSectionOffset)
+
+  const updatedMessage = `
+    ${messageWithoutGratitude}
+    ${gratitudePrefix}
+    ${gratitudeGivers.join(' ')}
+  `
+
+  const queryData = decodeCallbackQuery(callbackQuery.data)
+  const channelMessageId = callbackQuery.message.message_id
 
   const previousScore = queryData.currentScore
   const newScore = previousScore + 1
 
-  const gratitudeKeyboardWithResult = {
+  const gratitudeKeyboard = {
     reply_markup: {
       inline_keyboard: [
         [
           {
-            text: `Thank you! (${newScore})`,
-            callback_data: JSON.stringify({
+            text: 'Thank you!',
+            callback_data: encodeCallbackQuery({
               type: 'gratitude',
               currentScore: newScore
             })
@@ -76,8 +146,10 @@ const handleGratitudeCallback = (callbackQuery) => {
     }
   }
 
-  bot.editMessageReplyMarkup(gratitudeKeyboardWithResult, {
-    inline_message_id: inlineMessageId
+  bot.editMessageText(updatedMessage, {
+    chat_id: teamChannelId,
+    message_id: channelMessageId,
+    reply_markup: gratitudeKeyboard
   })
 }
 
@@ -96,8 +168,8 @@ async function main() {
         inline_keyboard: [
           [
             {
-              text: 'Thank you! 👍',
-              callback_data: JSON.stringify({
+              text: 'Thank you!',
+              callback_data: encodeCallbackQuery({
                 type: 'gratitude',
                 currentScore: 0
               })
@@ -114,18 +186,13 @@ async function main() {
     )
     const channelMessageId = channelMessage.message_id
 
-    const teamChannelOpts = {
-      chat_id: teamChannelId,
-      message_id: channelMessageId
-    }  
-
     const finishKeyboard = {
       reply_markup: {
         inline_keyboard: [
           [
             {
               text: 'Finish Activity',
-              callback_data: JSON.stringify({
+              callback_data: encodeCallbackQuery({
                 type: 'finish',
                 messageDate: msg.date,
                 channelMessageId: channelMessageId,
@@ -136,8 +203,6 @@ async function main() {
       }
     }
 
-    bot.editMessageReplyMarkup(gratitudeKeyboard, teamChannelOpts)
-
     bot.sendMessage(
       userChatId,
       messageWithStatus,
@@ -146,7 +211,7 @@ async function main() {
   })
 
   bot.on('callback_query', (callbackQuery) => {
-    const queryData = JSON.parse(callbackQuery.data)
+    const queryData = decodeCallbackQuery(callbackQuery.data)
 
     if (queryData && queryData.type) {
       const type = queryData.type
