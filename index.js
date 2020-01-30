@@ -149,7 +149,7 @@ const handleGratitudeCallback = (callbackQuery) => {
   bot.editMessageText(updatedMessage, {
     chat_id: teamChannelId,
     message_id: channelMessageId,
-    reply_markup: gratitudeKeyboard
+    // reply_markup: gratitudeKeyboard
   })
 }
 
