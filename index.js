@@ -1,7 +1,7 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api')
-const moment = require('moment')
-const { format, formatDistance, formatDistanceToNow } = require('date-fns')
+const { formatDistanceToNow } = require('date-fns')
+const redisClient = require('./redisClient')
 
 const token = process.env.BOT_TOKEN
 const teamChannelId = process.env.CHANNEL_ID
@@ -9,11 +9,11 @@ const teamChannelId = process.env.CHANNEL_ID
 const bot = new TelegramBot(token, { polling: true })
 
 const welcomeMessage = (username) => {
-  return `Hey ${username}! When starting working activity - just type your intention here and it will be broadcasted to team channel for coordination`
+  return `Thanks for joining, ${username}!`
 }
 
 const answerMessage = (username, timeSpent) => {
-  return `Well done, ${username}! Your activity took ${timeSpent}`
+  return `Well done, ${username}! Your achievement took ${timeSpent}`
 }
 
 const encodeCallbackQuery = (query) => {
@@ -155,7 +155,12 @@ const handleGratitudeCallback = (callbackQuery) => {
 
 async function main() {
   bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, welcomeMessage(msg.from.username));
+    const userChatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    bot.sendMessage(userChatId, welcomeMessage(msg.from.username));
+    
+    redisClient.addUser({ userId, userChatId })
   });
 
   bot.onText(/./, async msg => {
