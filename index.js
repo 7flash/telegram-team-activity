@@ -158,7 +158,7 @@ async function main() {
     const userChatId = msg.chat.id;
     const userId = msg.from.id;
 
-    bot.sendMessage(userChatId, welcomeMessage(msg.from.username));
+    bot.sendMessage(userChatId, welcomeMessage(msg.from.first_name));
     
     redisClient.addUser({ userId, userChatId })
   });
