@@ -2,11 +2,17 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api')
 const { formatDistanceToNow } = require('date-fns')
 const redisClient = require('./redisClient')
+const quotes = require('./quotes.json')
+const questions = require('./questions.json')
 
 const token = process.env.BOT_TOKEN
 const teamChannelId = process.env.CHANNEL_ID
 
 const bot = new TelegramBot(token, { polling: true })
+
+const millisecondsInHour = 1000 * 1000
+const numberOfQuotes = quotes.length
+const numberOfQuestions = questions.length
 
 const welcomeMessage = (username) => {
   return `Thanks for joining, ${username}!`
@@ -15,6 +21,23 @@ const welcomeMessage = (username) => {
 const answerMessage = (username, timeSpent) => {
   return `Well done, ${username}! Your achievement took ${timeSpent}`
 }
+
+const reminderMessage = (userName) => {
+  const randomQuote = getRandomQuote()
+  const randomQuestion = getRandomQuestion()
+  const maybeQuoteAuthor = randomQuote.quoteAuthor ? `(${randomQuote.quoteAuthor})` : ''
+
+  const reminderMessage = `
+      ${randomQuote.quoteText} ${maybeQuoteAuthor}
+
+      *${randomQuestion}, ${userName} ?*
+  `
+
+  return reminderMessage
+}
+
+const getRandomQuote = () => quotes[Math.floor(Math.random() * numberOfQuotes)]
+const getRandomQuestion = () => questions[Math.floor(Math.random() * numberOfQuestions)]
 
 const encodeCallbackQuery = (query) => {
   if (query['type'] == 'gratitude') {
@@ -153,18 +176,60 @@ const handleGratitudeCallback = (callbackQuery) => {
   })
 }
 
-async function main() {
+
+const shouldSendReminder = (lastReminderTime, lastResponseTime, currentTime) => {
+  const noResponseTime = lastReminderTime - lastResponseTime
+
+  const hasRespondedToLastReminder = noResponseTime < 0
+
+  if (hasRespondedToLastReminder) {
+    return true
+  } else {
+    const waitingTime = currentTime - lastReminderTime
+
+    if (waitingTime >= noResponseTime) {
+      return true;
+    } else {
+      return false;
+    }
+
+  }
+}
+
+const sendReminders = async () => {
+  const users = await redisClient.getUsers()
+
+  for (const user of users) {
+    const { userId, chatId, userName, reminderTime, responseTime } = user
+
+    const currentTime = Math.round(Date.now() / 1000)
+
+    const isReminderTime = shouldSendReminder(reminderTime, responseTime, currentTime)
+
+    if (isReminderTime) {
+      console.log(`send reminder to ${userId}`)
+      await redisClient.updateReminderTime({ userId, currentTime })
+      await bot.sendMessage(chatId, reminderMessage(userName), { parse_mode: 'Markdown' })
+    }
+  }
+}
+
+const handleMessages = () => {
   bot.onText(/\/start/, (msg) => {
     const userChatId = msg.chat.id;
     const userId = msg.from.id;
+    const userName = `${msg.from.first_name} ${msg.from.last_name}`;
 
-    bot.sendMessage(userChatId, welcomeMessage(msg.from.first_name));
-    
-    redisClient.addUser({ userId, userChatId })
+    bot.sendMessage(userChatId, welcomeMessage(userName));
+
+    redisClient.addUser({ userId, userChatId, userName })
   });
 
   bot.onText(/./, async msg => {
+    if (msg.text == '/start') return;
+
     const userChatId = msg.chat.id
+    const userId = msg.from.id
     const messageWithStatus = `${msg.text} (in progress)`
     const messageWithStatusAndNickname = `@${msg.from.username} ${messageWithStatus}`
 
@@ -213,6 +278,8 @@ async function main() {
       messageWithStatus,
       finishKeyboard
     )
+
+    redisClient.updateResponseTime(userId)
   })
 
   bot.on('callback_query', (callbackQuery) => {
@@ -230,6 +297,11 @@ async function main() {
   })
 
   bot.on("polling_error", (err) => console.log(err))
+}
+
+async function main() {
+  setInterval(sendReminders, millisecondsInHour)
+  handleMessages()
 }
 
 main()

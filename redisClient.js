@@ -12,12 +12,17 @@ const saddAsync = promisify(redisClient.sadd).bind(redisClient)
 const getAsync = promisify(redisClient.get).bind(redisClient)
 const smembersAsync = promisify(redisClient.smembers).bind(redisClient)
 
-const addUser = async ({ userId, userChatId }) => {
+const addUser = async ({ userId, userChatId, userName }) => {
+    const currentTime = Math.round(Date.now() / 1000)
+
     await Promise.all([
         saddAsync(`${prefix}:users`, userId),
-        setAsync(`${prefix}:${userId}`, userChatId)
+        setAsync(`${prefix}:${userId}`, userChatId),
+        setAsync(`${prefix}:${userId}:name`, userName),
+        setAsync(`${prefix}:${userId}:response`, currentTime),
+        setAsync(`${prefix}:${userId}:reminder`, 0),
     ])
-    console.log(`${userId} => ${userChatId}`)
+    console.log(`${userName} => ${userChatId}`)
 }
 
 const getUsers = async () => {
@@ -26,14 +31,27 @@ const getUsers = async () => {
     const users = []
 
     for (let userId of userIds) {
-        const userChatId = await getAsync(`${prefix}:${userId}`)
+        const chatId = await getAsync(`${prefix}:${userId}`)
+        const responseTime = await getAsync(`${prefix}:${userId}:response`)
+        const reminderTime = await getAsync(`${prefix}:${userId}:reminder`)
+        const userName = await getAsync(`${prefix}:${userId}:name`)
 
         users.push({
-            userId, userChatId
+            userId, chatId, responseTime, reminderTime, userName
         })
     }
 
     return users
 }
 
-module.exports = { addUser, getUsers }
+const updateResponseTime = async (userId) => {
+    const currentTime = Math.round(Date.now() / 1000)
+
+    await setAsync(`${prefix}:${userId}:response`, currentTime)
+}
+
+const updateReminderTime = async ({ userId, currentTime }) => {
+    await setAsync(`${prefix}:${userId}:reminder`, currentTime)
+}
+
+module.exports = { addUser, getUsers, updateResponseTime, updateReminderTime }
