@@ -10,7 +10,7 @@ const teamChannelId = process.env.CHANNEL_ID
 
 const bot = new TelegramBot(token, { polling: true })
 
-const millisecondsInHour = 1000 * 1000
+const millisecondsInHour = 3600 * 1000
 const numberOfQuotes = quotes.length
 const numberOfQuestions = questions.length
 
